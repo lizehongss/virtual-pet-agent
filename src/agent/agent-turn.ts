@@ -57,7 +57,6 @@ export async function runAgentTurn(
       decision.toolCalls,
       options.debug ?? false,
     );
-
     if (decision.toolCalls.length === 0) {
       const reply = decision.content?.trim();
       if (!reply) {
@@ -120,7 +119,6 @@ export async function runAgentTurn(
       },
       options.debug ?? false,
     );
-
     return {
       ok: execution.ok,
       reply: execution.message,
