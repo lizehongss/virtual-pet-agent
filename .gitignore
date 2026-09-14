@@ -6,7 +6,9 @@ data/
 # 环境变量和本地密钥
 .env
 .env.*
-!.env.example
+
+# 本地模型配置，真实文件可能包含 API Key
+config/*.local.json
 
 # 构建和测试产物
 dist/

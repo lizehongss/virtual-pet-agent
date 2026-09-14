@@ -1,5 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { chatWithPet } from "./agent/chat";
+import { createLlmClientFromConfigFile } from "./agent/llm-client";
+import type { ChatMessage, LlmClient } from "./agent/llm-client";
 import { applyPetAction } from "./domain/actions";
 import type { PetAction } from "./domain/pet";
 import {
@@ -35,25 +38,61 @@ function printActionResult(result: ReturnType<typeof applyPetAction>): void {
   console.log(`操作成功：${result.event.type}`);
 }
 
+export async function runChatMode(
+  ask: (prompt: string) => Promise<string>,
+  initialPet: PetState,
+  llmClient: LlmClient,
+  chatHistory: ChatMessage[],
+): Promise<PetState> {
+  let pet = initialPet;
+
+  console.log("\n已进入连续聊天模式，输入 /exit 或 /quit 返回主菜单。");
+
+  while (true) {
+    pet = advanceTime(pet);
+    const message = (await ask("你：")).trim();
+
+    if (message === "/exit" || message === "/quit") {
+      console.log("已退出聊天模式。");
+      return pet;
+    }
+
+    const result = await chatWithPet(pet, message, llmClient, chatHistory);
+    console.log(`\n${pet.name}：${result.reply}`);
+
+    if (result.ok) {
+      chatHistory.push(
+        { role: "user", content: message },
+        { role: "assistant", content: result.reply },
+      );
+      if (chatHistory.length > 20) {
+        chatHistory.splice(0, chatHistory.length - 20);
+      }
+    }
+  }
+}
+
 export async function runCli(
   repository: PetRepository = new JsonPetRepository(),
 ): Promise<void> {
   const readline = createInterface({ input, output });
   let pet = await repository.getFirstPet();
+  const llmClient = await createLlmClientFromConfigFile();
+  const chatHistory: ChatMessage[] = [];
 
   if (!pet) {
     pet = createInitialPet("Mochi");
     await repository.savePet(pet);
   }
 
-  console.log("欢迎来到 Virtual Pet Agent（M1：确定性宠物核心）");
+  console.log("欢迎来到 Virtual Pet Agent（M3：AI 对话）");
 
   try {
     while (true) {
       pet = advanceTime(pet);
       await repository.savePet(pet);
       console.log(
-        "\n请选择：1 查看状态  2 喂食  3 玩耍  4 睡觉  5 抚摸  0 退出",
+        "\n请选择：1 查看状态  2 喂食  3 玩耍  4 睡觉  5 抚摸  6 进入聊天  0 退出",
       );
       const choice = (await readline.question("> ")).trim();
 
@@ -88,6 +127,15 @@ export async function runCli(
         case "5":
           action = { type: "pet" };
           break;
+        case "6": {
+          pet = await runChatMode(
+            (prompt) => readline.question(prompt),
+            pet,
+            llmClient,
+            chatHistory,
+          );
+          continue;
+        }
         default:
           console.log("无法识别这个选项。");
           continue;

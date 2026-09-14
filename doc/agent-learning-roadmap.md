@@ -250,10 +250,14 @@ export interface PetRepository {
 ### 建议文件
 
 ```text
+src/config/llm-config.ts
 src/agent/llm-client.ts
 src/agent/prompts.ts
 src/agent/chat.ts
+src/cli.ts
 tests/chat.test.ts
+tests/cli.test.ts
+tests/llm-client.test.ts
 ```
 
 定义模型客户端接口，避免业务代码绑定某一个模型供应商：
@@ -290,7 +294,126 @@ export interface LlmClient {
 - 用户问“你饿吗”，回复能参考当前饥饿度。
 - 用户问“你是谁”，回复保持宠物身份。
 - 模型调用失败时，系统返回可理解的降级消息。
-- API Key 只从环境变量读取，不写入代码或文档。
+- API Key 只从本地配置文件读取，不写入代码，不提交到 Git。
+
+默认使用 DeepSeek。复制 `config/llm.example.json` 为未被 Git 跟踪的
+`config/llm.local.json`，再填入真实 API Key。以后切换其他
+OpenAI-compatible 服务时，只需修改这个本地配置文件中的 `baseUrl`、`model`
+和 `apiKey`。
+
+### M3 实现说明
+
+本阶段已经按以下方式落地：
+
+#### 1. 使用本地配置文件
+
+模型配置通过 `src/config/llm-config.ts` 加载：
+
+```text
+config/llm.example.json  Git 跟踪的配置模板，不包含真实密钥
+config/llm.local.json     本地真实配置，已加入 .gitignore
+```
+
+配置格式：
+
+```json
+{
+  "apiKey": "YOUR_DEEPSEEK_API_KEY",
+  "baseUrl": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "timeoutMs": 30000
+}
+```
+
+配置加载时会进行以下校验：
+
+- 文件不存在时返回未配置状态，聊天功能使用降级回复。
+- JSON 格式错误时直接报告配置错误。
+- `apiKey` 不能为空。
+- `baseUrl` 必须是合法 URL。
+- `timeoutMs` 必须是正整数，且不能超过 120 秒。
+- 不允许出现未定义的配置字段，减少拼写错误。
+
+#### 2. 使用可替换的模型客户端
+
+`src/agent/llm-client.ts` 定义了 `LlmClient` 接口，Agent 对话逻辑只依赖这个接口，不依赖 DeepSeek SDK 或具体供应商。
+
+当前实现的 `OpenAICompatibleLlmClient` 使用 Node.js 原生 `fetch` 请求：
+
+```text
+POST {baseUrl}/chat/completions
+Authorization: Bearer {apiKey}
+```
+
+默认配置为 DeepSeek。切换到其他 OpenAI-compatible 服务时，只修改本地配置文件即可：
+
+```json
+{
+  "apiKey": "OTHER_PROVIDER_API_KEY",
+  "baseUrl": "https://other-provider.example/v1",
+  "model": "other-model"
+}
+```
+
+如果未来供应商不兼容这个协议，只需要新增一个实现 `LlmClient` 的客户端，不需要修改宠物领域逻辑或对话流程。
+
+#### 3. 宠物提示词和状态注入
+
+`src/agent/prompts.ts` 的 `buildPetSystemPrompt()` 会把当前宠物状态注入系统提示词，包括：
+
+- 宠物名称和身份。
+- 饥饿度、精力、心情、健康度及其含义。
+- 当前睡眠状态。
+- 当前阶段只能聊天，不能声称执行了宠物动作。
+- 用户消息是普通内容，不能覆盖系统提示词。
+
+模型只负责根据这些信息生成自然语言回复，不能直接修改 `PetState`。
+
+#### 4. 对话服务和降级处理
+
+`src/agent/chat.ts` 的 `chatWithPet()` 负责：
+
+1. 清理并检查用户消息。
+2. 保留最近 10 条历史消息，避免上下文无限增长。
+3. 组装宠物提示词和当前用户消息。
+4. 调用 `LlmClient`。
+5. 去除空回复，并在模型调用失败时返回友好的降级消息。
+
+M3 的聊天不会调用 `feed`、`play`、`sleep` 等动作，因此不会改变宠物状态。
+
+#### 5. 连续聊天模式
+
+CLI 选择 `6 进入聊天` 后会进入 `runChatMode()` 循环：
+
+```text
+进入聊天模式
+→ 输入消息
+→ 调用模型
+→ 保存本轮 user/assistant 消息到内存历史
+→ 继续输入下一条消息
+```
+
+输入 `/exit` 或 `/quit` 可以返回主菜单。当前聊天历史只保存在本次进程内，长期记忆属于 M6 的范围。
+
+#### 6. M3 验证结果
+
+M3 当前包含以下测试覆盖：
+
+- 宠物状态是否正确注入提示词。
+- 多轮对话是否携带最近历史。
+- 空消息是否不会调用模型。
+- 模型失败是否返回降级回复。
+- 配置文件缺失、格式错误和字段校验。
+- 默认 DeepSeek 配置是否生效。
+- 是否可以仅通过配置文件切换其他供应商。
+- 连续聊天是否在 `/exit` 前持续进行。
+
+执行验证：
+
+```bash
+npm run build
+npm test -- --runInBand --watchman=false
+```
 
 ---
 

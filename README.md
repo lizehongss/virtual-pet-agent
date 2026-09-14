@@ -34,7 +34,7 @@
 - [x] M0：项目初始化
 - [x] M1：宠物核心
 - [x] M2：持久化
-- [ ] M3：AI 对话
+- [x] M3：AI 对话
 - [ ] M4：工具调用
 - [ ] M5：Agent Loop
 - [ ] M6：记忆
@@ -43,7 +43,7 @@
 
 ## 开始方式
 
-项目已经完成 M0、M1 和 M2。现在可以按照文档进入 M3，实现 AI 对话。
+项目已经完成 M0、M1、M2 和 M3。现在可以按照文档进入 M4，实现 Agent 工具调用。
 
 如果需要重新初始化环境，M0 使用以下命令：
 
@@ -62,13 +62,25 @@ npm run build
 npm test
 ```
 
-M1 CLI 可以通过以下命令启动：
+CLI 可以通过以下命令启动：
 
 ```bash
 npm run dev
 ```
 
 当前支持查看状态、喂食、玩耍、睡觉和抚摸。宠物状态和动作事件会保存到 `data/pet-store.json`，程序重启后可以继续使用之前的宠物。
+
+M3 增加了聊天选项，默认使用 DeepSeek。先复制本地配置文件：
+
+```bash
+cp config/llm.example.json config/llm.local.json
+# 编辑 config/llm.local.json，填入真实 API Key
+npm run dev
+```
+
+底层使用的是通用 OpenAI-compatible 客户端。后续切换其他兼容服务时，只需要修改 `config/llm.local.json` 中的 `apiKey`、`baseUrl` 和 `model`，不需要修改 Agent 代码。`config/llm.local.json` 已被 `.gitignore` 忽略，Git 中只保留 [config/llm.example.json](config/llm.example.json)。没有配置本地文件时，聊天功能会返回降级提示，不会影响其他宠物动作。
+
+选择 `6 进入聊天` 后会进入连续聊天模式，不需要重复选择 `6`。输入 `/exit` 或 `/quit` 可以返回主菜单。
 
 ## 目录说明
 
