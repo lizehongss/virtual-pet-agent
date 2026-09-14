@@ -86,4 +86,48 @@ describe("LLM client configuration", () => {
       "LLM config is not valid JSON",
     );
   });
+
+  it("logs the model response only when debug mode is enabled", async () => {
+    const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "你好呀！" } }],
+        }),
+        { status: 200 },
+        ),
+    );
+    const logSpy = jest
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+
+    const client = new OpenAICompatibleLlmClient({
+      apiKey: "test-key",
+      baseUrl: DEFAULT_DEEPSEEK_BASE_URL,
+      model: DEFAULT_DEEPSEEK_MODEL,
+      timeoutMs: 30_000,
+      debug: true,
+    });
+
+    await client.generateText({ system: "system", messages: [] });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[dev][llm] model text response"),
+    );
+
+    logSpy.mockClear();
+    const quietClient = new OpenAICompatibleLlmClient({
+      apiKey: "test-key",
+      baseUrl: DEFAULT_DEEPSEEK_BASE_URL,
+      model: DEFAULT_DEEPSEEK_MODEL,
+      timeoutMs: 30_000,
+      debug: false,
+    });
+
+    await quietClient.generateText({ system: "system", messages: [] });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+    logSpy.mockRestore();
+  });
 });
