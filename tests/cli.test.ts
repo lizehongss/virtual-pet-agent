@@ -3,10 +3,13 @@ import type {
   ChatMessage,
   GenerateTextInput,
   LlmClient,
+  GenerateWithToolsInput,
+  GenerateWithToolsResult,
+  ToolCallingLlmClient,
 } from "../src/agent/llm-client";
 import { createInitialPet } from "../src/domain/pet";
 
-class FakeLlmClient implements LlmClient {
+class FakeLlmClient implements ToolCallingLlmClient {
   public readonly calls: GenerateTextInput[] = [];
 
   private responseNumber = 0;
@@ -15,6 +18,14 @@ class FakeLlmClient implements LlmClient {
     this.calls.push(input);
     this.responseNumber += 1;
     return `回复 ${this.responseNumber}`;
+  }
+
+  async generateWithTools(
+    input: GenerateWithToolsInput,
+  ): Promise<GenerateWithToolsResult> {
+    this.calls.push(input);
+    this.responseNumber += 1;
+    return { content: `回复 ${this.responseNumber}`, toolCalls: [] };
   }
 }
 

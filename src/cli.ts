@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { chatWithPet } from "./agent/chat";
+import { runAgentTurn } from "./agent/agent-turn";
 import { createLlmClientFromConfigFile } from "./agent/llm-client";
-import type { ChatMessage, LlmClient } from "./agent/llm-client";
+import type { ChatMessage, ToolCallingLlmClient } from "./agent/llm-client";
 import { applyPetAction } from "./domain/actions";
 import type { PetAction } from "./domain/pet";
 import {
@@ -11,6 +11,7 @@ import {
   isPetSleeping,
 } from "./domain/pet";
 import type { PetState } from "./domain/pet";
+import { PetToolRegistry } from "./agent/tools";
 import {
   JsonPetRepository,
   PetRepository,
@@ -41,8 +42,11 @@ function printActionResult(result: ReturnType<typeof applyPetAction>): void {
 export async function runChatMode(
   ask: (prompt: string) => Promise<string>,
   initialPet: PetState,
-  llmClient: LlmClient,
+  llmClient: ToolCallingLlmClient,
   chatHistory: ChatMessage[],
+  toolRegistry = new PetToolRegistry(),
+  onTurn: (result: Awaited<ReturnType<typeof runAgentTurn>>) => Promise<void> =
+    async () => undefined,
 ): Promise<PetState> {
   let pet = initialPet;
 
@@ -57,7 +61,15 @@ export async function runChatMode(
       return pet;
     }
 
-    const result = await chatWithPet(pet, message, llmClient, chatHistory);
+    const result = await runAgentTurn(
+      pet,
+      message,
+      llmClient,
+      toolRegistry,
+      chatHistory,
+    );
+    pet = result.state;
+    await onTurn(result);
     console.log(`\n${pet.name}：${result.reply}`);
 
     if (result.ok) {
@@ -79,6 +91,7 @@ export async function runCli(
   let pet = await repository.getFirstPet();
   const llmClient = await createLlmClientFromConfigFile();
   const chatHistory: ChatMessage[] = [];
+  const toolRegistry = new PetToolRegistry();
 
   if (!pet) {
     pet = createInitialPet("Mochi");
@@ -133,6 +146,13 @@ export async function runCli(
             pet,
             llmClient,
             chatHistory,
+            toolRegistry,
+            async (result) => {
+              await repository.savePet(result.state);
+              if (result.event) {
+                await repository.appendEvent(result.event);
+              }
+            },
           );
           continue;
         }
