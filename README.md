@@ -36,14 +36,14 @@
 - [x] M2：持久化
 - [x] M3：AI 对话
 - [x] M4：工具调用
-- [ ] M5：Agent Loop
+- [x] M5：Agent Loop
 - [ ] M6：记忆
 - [ ] M7：主动行为
 - [ ] M8：界面与可靠性
 
 ## 开始方式
 
-项目已经完成 M0、M1、M2、M3 和 M4。现在可以按照文档进入 M5，实现 Agent Loop。
+项目已经完成 M0、M1、M2、M3、M4 和 M5。现在可以按照文档进入 M6，实现短期和长期记忆。
 
 如果需要重新初始化环境，M0 使用以下命令：
 
@@ -81,6 +81,8 @@ npm run dev
 底层使用的是通用 OpenAI-compatible 客户端。后续切换其他兼容服务时，只需要修改 `config/llm.local.json` 中的 `apiKey`、`baseUrl` 和 `model`，不需要修改 Agent 代码。`config/llm.local.json` 已被 `.gitignore` 忽略，Git 中只保留 [config/llm.example.json](config/llm.example.json)。没有配置本地文件时，聊天功能会返回降级提示，不会影响其他宠物动作。
 
 选择 `6 进入聊天` 后会进入连续聊天模式，不需要重复选择 `6`。Agent 现在可以根据对话选择宠物工具。输入 `/exit` 或 `/quit` 可以返回主菜单。
+
+M5 已将工具调用升级为受控 Agent Loop：模型执行工具后会收到工具结果，再决定是否继续调用工具或生成最终回复。单次用户请求最多循环 3 步，工具事件会全部保存；超过步数、模型输出非法或工具执行失败时会返回降级提示，不会伪造成功结果。
 
 开发模式 `npm run dev` 会打印调试日志，包括：
 

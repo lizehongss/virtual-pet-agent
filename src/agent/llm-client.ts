@@ -11,9 +11,33 @@ export type ChatMessage = {
   content: string;
 };
 
+export type AssistantToolCallMessage = {
+  role: "assistant";
+  content: string | null;
+  tool_calls: Array<{
+    id: string;
+    type: "function";
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+};
+
+export type ToolResultMessage = {
+  role: "tool";
+  content: string;
+  tool_call_id: string;
+};
+
+export type LlmMessage =
+  | ChatMessage
+  | AssistantToolCallMessage
+  | ToolResultMessage;
+
 export type GenerateTextInput = {
   system: string;
-  messages: ChatMessage[];
+  messages: LlmMessage[];
 };
 
 export type LlmToolDefinition = {

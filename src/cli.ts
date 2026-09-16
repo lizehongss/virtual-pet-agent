@@ -152,8 +152,8 @@ export async function runCli(
             toolRegistry,
             async (result) => {
               await repository.savePet(result.state);
-              if (result.event) {
-                await repository.appendEvent(result.event);
+              for (const event of result.events) {
+                await repository.appendEvent(event);
               }
             },
             debug,
