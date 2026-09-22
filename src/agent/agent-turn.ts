@@ -12,6 +12,8 @@ import { PetToolRegistry } from "./tools";
 import type { ToolExecutionResult } from "./tools";
 import { advanceTime } from "../domain/pet";
 import { devLog } from "./debug";
+import type { PetMemory } from "../memory/memory-repository";
+import { getRecentMessages } from "../memory/short-term-memory";
 
 export const MAX_AGENT_STEPS = 3;
 
@@ -32,7 +34,7 @@ export async function runAgentTurn(
   llmClient: ToolCallingLlmClient,
   toolRegistry: PetToolRegistry,
   history: ChatMessage[] = [],
-  options: { debug?: boolean } = {},
+  options: { debug?: boolean; memories?: PetMemory[] } = {},
 ): Promise<AgentTurnResult> {
   const requestId = randomUUID();
   const content = userMessage.trim();
@@ -56,14 +58,17 @@ export async function runAgentTurn(
   }
 
   const messages: LlmMessage[] = [
-    ...history.slice(-10),
+    ...getRecentMessages(history),
     { role: "user", content },
   ];
 
   try {
     for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
       const decision = await llmClient.generateWithTools({
-        system: buildPetSystemPrompt(currentPet, { allowTools: true }),
+        system: buildPetSystemPrompt(currentPet, {
+          allowTools: true,
+          memories: options.memories,
+        }),
         messages,
         tools: toolRegistry.getDefinitions(),
       });

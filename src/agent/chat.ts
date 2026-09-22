@@ -1,8 +1,8 @@
 import type { PetState } from "../domain/pet";
 import type { ChatMessage, LlmClient } from "./llm-client";
 import { buildPetSystemPrompt } from "./prompts";
-
-const MAX_HISTORY_MESSAGES = 10;
+import type { PetMemory } from "../memory/memory-repository";
+import { getRecentMessages } from "../memory/short-term-memory";
 
 export type ChatResult =
   | {
@@ -24,6 +24,7 @@ export async function chatWithPet(
   userMessage: string,
   llmClient: LlmClient,
   history: ChatMessage[] = [],
+  memories: PetMemory[] = [],
 ): Promise<ChatResult> {
   const content = userMessage.trim();
 
@@ -36,13 +37,13 @@ export async function chatWithPet(
   }
 
   const messages: ChatMessage[] = [
-    ...history.slice(-MAX_HISTORY_MESSAGES),
+    ...getRecentMessages(history),
     { role: "user", content },
   ];
 
   try {
     const reply = (await llmClient.generateText({
-      system: buildPetSystemPrompt(pet),
+      system: buildPetSystemPrompt(pet, { memories }),
       messages,
     })).trim();
 

@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { runAgentTurn } from "./agent/agent-turn";
 import { createLlmClientFromConfigFile } from "./agent/llm-client";
 import type { ChatMessage, ToolCallingLlmClient } from "./agent/llm-client";
+import { devLog } from "./agent/debug";
 import { applyPetAction } from "./domain/actions";
 import type { PetAction } from "./domain/pet";
 import {
@@ -12,6 +13,13 @@ import {
 } from "./domain/pet";
 import type { PetState } from "./domain/pet";
 import { PetToolRegistry } from "./agent/tools";
+import {
+  InMemoryMemoryRepository,
+  JsonMemoryRepository,
+} from "./memory/memory-repository";
+import type { PetMemory } from "./memory/memory-repository";
+import { PetMemoryService } from "./memory/memory-service";
+import { appendShortTermTurn } from "./memory/short-term-memory";
 import {
   JsonPetRepository,
   PetRepository,
@@ -48,6 +56,7 @@ export async function runChatMode(
   onTurn: (result: Awaited<ReturnType<typeof runAgentTurn>>) => Promise<void> =
     async () => undefined,
   debug = false,
+  memoryService = new PetMemoryService(new InMemoryMemoryRepository()),
 ): Promise<PetState> {
   let pet = initialPet;
 
@@ -62,27 +71,49 @@ export async function runChatMode(
       return pet;
     }
 
+    let memories: PetMemory[] = [];
+    try {
+      const savedMemories =
+        await memoryService.rememberFromUserMessage(pet.id, message);
+      memories = await memoryService.getRelevantMemories(pet.id, message);
+
+      devLog(
+        "memory",
+        "retrieved memories",
+        { query: message, memories },
+        debug,
+      );
+
+      if (savedMemories.length > 0) {
+        devLog(
+          "memory",
+          "saved long-term memories",
+          { memories: savedMemories },
+          debug,
+        );
+      }
+    } catch (error) {
+      devLog(
+        "memory",
+        "memory operation failed",
+        { error: error instanceof Error ? error.message : "Unknown memory error" },
+        debug,
+      );
+    }
+
     const result = await runAgentTurn(
       pet,
       message,
       llmClient,
       toolRegistry,
       chatHistory,
-      { debug },
+      { debug, memories },
     );
     pet = result.state;
     await onTurn(result);
     console.log(`\n${pet.name}：${result.reply}`);
 
-    if (result.ok) {
-      chatHistory.push(
-        { role: "user", content: message },
-        { role: "assistant", content: result.reply },
-      );
-      if (chatHistory.length > 20) {
-        chatHistory.splice(0, chatHistory.length - 20);
-      }
-    }
+    appendShortTermTurn(chatHistory, message, result.reply);
   }
 }
 
@@ -95,13 +126,22 @@ export async function runCli(
   const llmClient = await createLlmClientFromConfigFile(undefined, { debug });
   const chatHistory: ChatMessage[] = [];
   const toolRegistry = new PetToolRegistry();
+  const memoryRepository = new JsonMemoryRepository();
+  const memoryService = new PetMemoryService(memoryRepository);
+
+  devLog(
+    "memory",
+    "using memory store",
+    { filePath: memoryRepository.getFilePath() },
+    debug,
+  );
 
   if (!pet) {
     pet = createInitialPet("Mochi");
     await repository.savePet(pet);
   }
 
-  console.log("欢迎来到 Virtual Pet Agent（M3：AI 对话）");
+  console.log("欢迎来到 Virtual Pet Agent（M6：记忆）");
 
   try {
     while (true) {
@@ -157,6 +197,7 @@ export async function runCli(
               }
             },
             debug,
+            memoryService,
           );
           continue;
         }
