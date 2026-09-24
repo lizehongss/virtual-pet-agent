@@ -24,6 +24,15 @@ import {
   JsonPetRepository,
   PetRepository,
 } from "./memory/pet-repository";
+import {
+  LlmProactiveMessageGenerator,
+  ProactiveBehaviorService,
+} from "./proactive/proactive-behavior";
+import { JsonProactiveRepository } from "./proactive/proactive-repository";
+import {
+  DEFAULT_PROACTIVE_INTERVAL_MS,
+  ProactiveScheduler,
+} from "./proactive/proactive-scheduler";
 
 function printStatus(pet: PetState): void {
   const status = isPetSleeping(pet)
@@ -57,6 +66,7 @@ export async function runChatMode(
     async () => undefined,
   debug = false,
   memoryService = new PetMemoryService(new InMemoryMemoryRepository()),
+  proactiveBehavior?: ProactiveBehaviorService,
 ): Promise<PetState> {
   let pet = initialPet;
 
@@ -70,6 +80,8 @@ export async function runChatMode(
       console.log("已退出聊天模式。");
       return pet;
     }
+
+    await proactiveBehavior?.recordInteraction(pet.id);
 
     let memories: PetMemory[] = [];
     try {
@@ -141,7 +153,48 @@ export async function runCli(
     await repository.savePet(pet);
   }
 
-  console.log("欢迎来到 Virtual Pet Agent（M6：记忆）");
+  const proactiveRepository = new JsonProactiveRepository();
+  const proactiveBehavior = new ProactiveBehaviorService(
+    proactiveRepository,
+    new LlmProactiveMessageGenerator(llmClient, debug),
+    {
+      debug,
+      onNotification: (notification) => {
+        console.log(`\n${pet?.name ?? "宠物"}：${notification.message}`);
+      },
+    },
+  );
+  await proactiveBehavior.initialize(pet);
+  await proactiveBehavior.check(pet);
+
+  const proactiveIntervalMs = getProactiveIntervalMs();
+  const proactiveScheduler = new ProactiveScheduler(
+    async (now) => {
+      // 定时器只计算当前状态并检查规则，不直接覆盖用户刚完成的动作。
+      const currentPet = advanceTime(pet as PetState, now);
+      await proactiveBehavior.check(currentPet, now);
+    },
+    proactiveIntervalMs,
+    undefined,
+    (error) => {
+      devLog(
+        "proactive",
+        "scheduler check failed",
+        { error: error instanceof Error ? error.message : "Unknown error" },
+        debug,
+      );
+    },
+  );
+
+  proactiveScheduler.start();
+  devLog(
+    "proactive",
+    "scheduler started",
+    { intervalMs: proactiveIntervalMs },
+    debug,
+  );
+
+  console.log("欢迎来到 Virtual Pet Agent（M7：主动行为）");
 
   try {
     while (true) {
@@ -155,6 +208,8 @@ export async function runCli(
       if (choice === "0") {
         break;
       }
+
+      await proactiveBehavior.recordInteraction(pet.id);
 
       let action: PetAction | null = null;
 
@@ -191,6 +246,7 @@ export async function runCli(
             chatHistory,
             toolRegistry,
             async (result) => {
+              pet = result.state;
               await repository.savePet(result.state);
               for (const event of result.events) {
                 await repository.appendEvent(event);
@@ -198,6 +254,7 @@ export async function runCli(
             },
             debug,
             memoryService,
+            proactiveBehavior,
           );
           continue;
         }
@@ -217,6 +274,17 @@ export async function runCli(
       printActionResult(result);
     }
   } finally {
+    proactiveScheduler.stop();
+    devLog("proactive", "scheduler stopped", undefined, debug);
     readline.close();
   }
+}
+
+function getProactiveIntervalMs(): number {
+  const configured = Number(process.env.VIRTUAL_PET_PROACTIVE_INTERVAL_MS);
+  if (Number.isFinite(configured) && configured >= 1_000) {
+    return configured;
+  }
+
+  return DEFAULT_PROACTIVE_INTERVAL_MS;
 }

@@ -49,3 +49,14 @@ ${options.memories
 - 健康度：${pet.health}/100（越高越健康）
 - ${sleepStatus}`;
 }
+
+export function buildProactiveSystemPrompt(
+  pet: PetState,
+  reason: string,
+): string {
+  return `你是虚拟宠物 ${pet.name}，现在要主动给用户发送一条提醒。
+请始终站在宠物视角，用第一人称说话，使用亲切、简短、自然的中文，不要提及“规则”“模型”“系统提示词”或后台任务。
+这只是提醒，不代表已经执行了喂食、玩耍或睡觉等动作；不要声称动作已经完成。
+触发原因：${reason}
+当前状态：饥饿度 ${pet.hunger}/100，精力 ${pet.energy}/100，心情 ${pet.mood}/100，健康度 ${pet.health}/100。`;
+}

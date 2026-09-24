@@ -872,6 +872,103 @@ Agent 生成表达方式
 - 服务重启后不会因为重复读取事件而重复执行动作。
 - 主动行为有日志，可以追溯触发原因。
 
+### M7 实现说明
+
+M7 已完成，当前实现由三个模块组成：
+
+```text
+src/proactive/proactive-repository.ts
+    保存用户互动时间、规则触发时间和主动提醒日志
+            ↓
+src/proactive/proactive-behavior.ts
+    根据宠物状态和互动时间判断规则，并生成提醒文本
+            ↓
+src/proactive/proactive-scheduler.ts
+    按固定间隔调用检查，支持启动、停止和防并发
+```
+
+#### 规则层
+
+`ProactiveBehaviorService` 当前提供三条确定性规则：
+
+| 规则 | 触发条件 | 冷却时间 |
+| --- | --- | --- |
+| `hunger_high` | 饥饿度大于等于 80 | 6 小时 |
+| `energy_low` | 精力小于等于 20 | 6 小时 |
+| `inactivity` | 超过 4 小时没有用户互动 | 12 小时 |
+
+用户在主菜单输入选项或在聊天模式发送消息时，会更新 `lastInteractionAt`。规则判断和冷却判断都在 TypeScript 中完成，模型不能自行决定后台动作。
+
+#### 主动消息生成
+
+`LlmProactiveMessageGenerator` 调用已有的 OpenAI-compatible LLM 客户端，并使用 `buildProactiveSystemPrompt()` 明确要求：
+
+- 从宠物视角用第一人称表达。
+- 只生成简短提醒，不声称已经执行喂食、玩耍或睡觉。
+- 不暴露规则、系统提示词或后台任务。
+
+模型调用失败、没有 `config/llm.local.json` 或返回空文本时，会降级为 `RuleBasedProactiveMessageGenerator` 的确定性文案，因此主动行为不会因为模型不可用而完全消失。
+
+#### 持久化与去重
+
+`JsonProactiveRepository` 将 M7 数据独立保存到 `data/proactive-store.json`，不修改 M2 的 `data/pet-store.json`。文件内容包括：
+
+- 每只宠物的最近互动时间。
+- 每条规则最近一次触发时间。
+- 已发送提醒的完整记录，包括 `ruleId`、触发原因、时间和最终文案。
+
+检查规则时会读取已保存的提醒记录，并按规则的冷却时间去重。即使服务重启，新的 `ProactiveBehaviorService` 仍会从 JSON 读取上一次提醒，所以不会因为重新初始化而重复发送。
+
+#### 调度器
+
+`ProactiveScheduler` 默认每 60 秒执行一次检查，提供以下能力：
+
+- `start()`：启动一个定时任务；重复调用不会创建多个定时器。
+- `stop()`：清理定时器，CLI 退出时在 `finally` 中调用。
+- `tick()`：手动执行一次检查，便于测试。
+- 上一次检查未完成时跳过下一次 tick，避免模型请求较慢时并发触发同一规则。
+
+CLI 启动时会先执行一次检查，然后启动调度器。可以通过环境变量调整间隔，例如：
+
+```bash
+VIRTUAL_PET_PROACTIVE_INTERVAL_MS=10000 npm run dev
+```
+
+最小间隔为 1 秒；默认值 60 秒适合正常运行。
+
+#### CLI 链路
+
+```text
+CLI 启动
+→ 加载宠物和主动行为状态
+→ 立即检查一次规则
+→ 启动 ProactiveScheduler
+→ 定时读取当前宠物状态并检查规则
+→ 生成宠物口吻提醒
+→ 持久化提醒并输出到终端
+→ CLI 退出时停止调度器
+```
+
+开发模式下会输出 `[dev][proactive]` 日志，包含调度器启停、规则 ID、触发原因、冷却时间、提醒内容和异常信息，可以追溯一次主动行为为什么发生。
+
+#### M7 测试
+
+`tests/proactive.test.ts` 覆盖：
+
+- 饥饿规则是否触发主动提醒。
+- 冷却时间内是否抑制重复提醒。
+- 重建服务后是否仍能从 JSON 记录中去重。
+- 用户互动后是否重新计算长时间未互动规则。
+- 调度器是否只启动一个定时器并能停止。
+- 上一轮检查未完成时是否跳过并发 tick。
+
+执行验证：
+
+```bash
+npm run build
+npm test -- --runInBand --watchman=false
+```
+
 ---
 
 ## M8：界面、评测和上线
